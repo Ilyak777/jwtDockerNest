@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { AuthDto } from './dto';
@@ -20,27 +20,29 @@ export class AuthService {
 
     const tokens = await this.getTokens(newUser.id, newUser.email);
     await this.updateRtHash(newUser.id, tokens.refresh_token);
-
     return tokens;
   }
 
-  signinLocal() {}
+  async signinLocal(dto: AuthDto): Promise<Tokens> {
+    const user = await this.prisma.user.findUnique({
+      where: {
+        email: dto.email,
+      },
+    });
+    if (!user) throw new ForbiddenException('Access denied');
+
+    const passwordMatches = await bcrypt.compare(dto.password, user.hash);
+
+    if (!passwordMatches) throw new ForbiddenException('Access denied');
+    const tokens = await this.getTokens(user.id, user.email);
+    await this.updateRtHash(user.id, tokens.refresh_token);
+    return tokens;
+  }
 
   logoutLocal() {}
 
   refreshLocal() {}
 
-  async updateRtHash(userId: number, rt: string) {
-    const hash = await this.hashData(rt);
-    await this.prisma.user.update({
-      where: {
-        id: userId,
-      },
-      data: {
-        hashedRt: hash,
-      },
-    });
-  }
   hashData(data: string) {
     return bcrypt.hash(data, 20);
   }
@@ -53,7 +55,7 @@ export class AuthService {
           email,
         },
         {
-          secret: process.env.AT_SECRET,
+          secret: 'ar_secret',
           expiresIn: 60 * 15,
         },
       ),
@@ -63,7 +65,7 @@ export class AuthService {
           email,
         },
         {
-          secret: process.env.RT_SECRET,
+          secret: 'rt_secret',
           expiresIn: 60 * 24 * 60 * 7,
         },
       ),
@@ -73,5 +75,17 @@ export class AuthService {
       access_token: at,
       refresh_token: rt,
     };
+  }
+
+  async updateRtHash(userId: number, rt: string) {
+    const hash = await this.hashData(rt);
+    await this.prisma.user.update({
+      where: {
+        id: userId,
+      },
+      data: {
+        hashedRt: hash,
+      },
+    });
   }
 }
